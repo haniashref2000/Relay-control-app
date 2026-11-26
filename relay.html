@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Relay Control</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e1013">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Relay">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E⚡%3C/text%3E%3C/svg%3E">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--text:#14161a;--mut:#6b7280;--line:#e3e5ea;--on:#22c55e}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1013;--card:#171a1f;--text:#eceef2;--mut:#9aa1ad;--line:#262a31}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:16px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.app{width:100%;max-width:440px;padding:20px;display:flex;flex-direction:column;gap:16px}
+header{display:flex;justify-content:space-between;align-items:center}
+.brand{font-weight:700;font-size:18px}
+button{font:inherit;font-weight:600;color:var(--text);background:var(--card);border:1px solid var(--line);border-radius:14px;min-height:52px;cursor:pointer;touch-action:manipulation;transition:transform .1s,opacity .2s}
+button:active:not(:disabled){transform:scale(.97)}
+button:disabled{opacity:.45;cursor:default}
+.gear{min-height:40px;width:40px;border-radius:12px}
+.pill{align-self:center;display:flex;gap:8px;align-items:center;padding:6px 14px;border-radius:99px;background:var(--card);border:1px solid var(--line);font-size:14px;color:var(--mut)}
+.pill i{width:9px;height:9px;border-radius:50%;background:#d99a1f}
+.pill[data-s=ok] i{background:#22c55e}.pill[data-s=bad] i{background:#e5484d}
+.card{background:var(--card);border:1px solid var(--line);border-radius:22px;padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;transition:opacity .3s}
+.stale .card{opacity:.6}
+.name{width:100%;text-align:center;font:inherit;font-weight:700;font-size:22px;background:transparent;color:var(--text);-webkit-text-fill-color:var(--text);opacity:1;border:0;border-bottom:1px dashed transparent;border-radius:8px;padding:4px}
+.name:hover:not(:disabled),.name:focus{border-bottom-color:var(--mut);outline:0}
+.power{width:170px;height:170px;border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;letter-spacing:1px;color:var(--mut)}
+.power svg{width:52px;height:52px}
+.power.on{background:var(--on);color:#fff;border-color:transparent;box-shadow:0 0 0 10px rgba(34,197,94,.15),0 10px 40px rgba(34,197,94,.45)}
+.sub{color:var(--mut);font-size:14px;text-align:center}
+.row{width:100%;display:flex;justify-content:space-between;align-items:center}
+.tm{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums}
+.bar{width:100%;height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--on);transition:width .4s linear}
+.two{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ghost{width:100%;min-height:44px;font-weight:500;color:var(--mut)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center}
+.ov[hidden]{display:none}
+.sheet{width:100%;max-width:440px;background:var(--card);border-radius:20px 20px 0 0;padding:20px;display:flex;flex-direction:column;gap:10px}
+label{font-size:13px;color:var(--mut)}
+input.f{width:100%;font:inherit;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+.pri{background:#3b82f6;color:#fff;border:0}
+.err{color:#e5484d;font-size:14px;min-height:18px}
+</style>
+<script>
+// Load the MQTT library with fallbacks, so one CDN being down does not break the page
+window.__mqttReady=new Promise(function(done){
+  var u=["https://cdn.jsdelivr.net/npm/mqtt@5.3.4/dist/mqtt.min.js","https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.3.4/mqtt.min.js","https://unpkg.com/mqtt@5.3.4/dist/mqtt.min.js"],i=0;
+  (function next(){
+    if(window.mqtt)return done(true);
+    if(i>=u.length)return done(false);
+    var s=document.createElement("script");s.src=u[i++];s.onload=next;s.onerror=next;document.head.appendChild(s);
+  })();
+});
+</script>
+</head>
+<body>
+<div class="app" id="app">
+  <header><div class="brand">⚡ Relay Control</div><button class="gear" id="gear" aria-label="Settings">⚙️</button></header>
+  <div class="pill" id="pill" data-s="warn"><i></i><span id="pt">Connecting…</span></div>
+
+  <section class="card">
+    <input class="name" id="name" maxlength="20" spellcheck="false" autocomplete="off" aria-label="Device name" placeholder="Device name" disabled>
+    <div class="sub">Tap the name to rename the device</div>
+    <button class="power" id="power" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9M6.4 6.4a8 8 0 1 0 11.2 0"/></svg>
+      <span id="pw">OFF</span>
+    </button>
+  </section>
+
+  <section class="card">
+    <div class="row"><b>Timer</b><span class="sub" id="tl">No timer set</span></div>
+    <div class="tm" id="tm">00:00</div>
+    <div class="bar"><i id="bf"></i></div>
+    <div class="two"><button id="tMinus" disabled>− 5 min</button><button id="tPlus" disabled>+ 5 min</button></div>
+    <button class="ghost" id="tClear" disabled>Clear timer</button>
+  </section>
+</div>
+
+<div class="ov" id="ov" hidden><div class="sheet">
+  <b>Settings</b>
+  <label>Device ID (same as DEVICE_ID in the sketch)</label><input class="f" id="fDev" autocapitalize="off" autocomplete="off">
+  <label>Broker URL</label><input class="f" id="fUrl" autocapitalize="off">
+  <label>Username (optional)</label><input class="f" id="fUser" autocapitalize="off" autocomplete="off">
+  <label>Password (optional)</label><input class="f" id="fPass" type="password" autocomplete="off">
+  <div class="err" id="err"></div>
+  <div class="two"><button id="fCancel">Cancel</button><button id="fSave" class="pri">Save</button></div>
+</div></div>
+
+<script>
+(function(){
+var $=function(i){return document.getElementById(i)};
+var D={url:"wss://broker.emqx.io:8084/mqtt",user:"",pass:"",dev:""},KEY="relay-cfg";
+var cfg=load(),client=null,T={},st=null,stAt=0,dev=null,brokerUp=false,libFail=false,total=0,hiddenAt=0;
+
+function load(){try{var r=localStorage.getItem(KEY);if(r)return Object.assign({},D,JSON.parse(r))}catch(e){}return Object.assign({},D)}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(cfg))}catch(e){}}
+function pad(n){return n<10?"0"+n:""+n}
+function fmt(s){var h=Math.floor(s/3600),m=Math.floor(s%3600/60);return(h?h+":"+pad(m):pad(m))+":"+pad(s%60)}
+
+function connect(){
+  if(client){try{client.end(true)}catch(e){}client=null}
+  brokerUp=false;dev=null;st=null;total=0;
+  if(!cfg.dev){openSet();render();return}
+  if(!window.mqtt){render();return}
+  var b="relay/"+cfg.dev;
+  T={cmd:b+"/cmd",state:b+"/state",status:b+"/status"};
+  client=mqtt.connect(cfg.url,{clientId:"web-"+Math.random().toString(16).slice(2,10),username:cfg.user||undefined,password:cfg.pass||undefined,keepalive:30,reconnectPeriod:2000,connectTimeout:10000,clean:true});
+  client.on("connect",function(){brokerUp=true;client.subscribe([T.state,T.status]);render()});
+  client.on("close",function(){brokerUp=false;render()});
+  client.on("error",function(e){console.warn(e)});
+  client.on("message",function(t,p){
+    var s=new TextDecoder().decode(p);
+    if(t===T.status)dev=(s==="online")?"online":"offline";
+    else try{var o=JSON.parse(s);
+      if(typeof o.on==="boolean"&&typeof o.timer==="number"){st=o;stAt=Date.now();if(!total||o.timer>total||!o.on)total=o.timer}
+    }catch(e){}
+    render();
+  });
+}
+
+function render(){
+  var now=Date.now(),fresh=!!st&&now-stAt<90000,ok=brokerUp&&fresh&&dev!=="offline";
+  var s="warn",t;
+  if(libFail){s="bad";t="Could not load MQTT library"}
+  else if(!cfg.dev)t="Open settings to connect";
+  else if(!brokerUp)t="Connecting to server…";
+  else if(dev==="offline"||(st&&!fresh)){s="bad";t="Device offline"}
+  else if(!st)t="Waiting for device…";
+  else{s="ok";t="Device online"}
+  $("pill").dataset.s=s;$("pt").textContent=t;
+
+  var on=false,tm=0,hasT=false,name="";
+  if(st){on=st.on;tm=st.timer;hasT=tm>0;name=st.name||"Relay";
+    if(on&&hasT&&ok)tm=Math.max(0,tm-Math.floor((now-stAt)/1000))}
+  $("app").classList.toggle("stale",!ok);
+  if(document.activeElement!==$("name"))$("name").value=name;
+  $("power").classList.toggle("on",on);
+  $("pw").textContent=on?"ON":"OFF";
+  $("tm").textContent=(on&&!hasT)?"--:--":fmt(tm);
+  $("tl").textContent=on?(hasT?"Turns off in":"No timer · stays on"):(hasT?"Preset · starts when turned on":"No timer set");
+  $("bf").style.width=(total?Math.min(100,tm/total*100):0)+"%";
+  $("name").disabled=$("power").disabled=!ok;
+  $("tPlus").disabled=!ok;
+  $("tMinus").disabled=$("tClear").disabled=!ok||!hasT;
+  document.title=(name||"Relay Control")+(ok&&on?" · ON":"");
+}
+
+function send(c){
+  if(!client||!client.connected)return;
+  client.publish(T.cmd,c,{qos:0});
+  try{navigator.vibrate&&navigator.vibrate(20)}catch(e){}
+}
+$("power").onclick=function(){send(st&&st.on?"off":"on")};
+$("tPlus").onclick=function(){send("t+")};
+$("tMinus").onclick=function(){send("t-")};
+$("tClear").onclick=function(){send("tclear")};
+$("name").addEventListener("change",function(){
+  var v=this.value.trim();
+  if(v&&st&&v!==st.name)send("name="+v);else this.value=st?st.name:"";
+});
+$("name").addEventListener("keydown",function(e){if(e.key==="Enter")this.blur()});
+
+function openSet(){
+  $("fDev").value=cfg.dev;$("fUrl").value=cfg.url;$("fUser").value=cfg.user;$("fPass").value=cfg.pass;
+  $("err").textContent="";$("ov").hidden=false;
+}
+$("gear").onclick=openSet;
+$("fCancel").onclick=function(){$("ov").hidden=true};
+$("fSave").onclick=function(){
+  var d=$("fDev").value.trim(),u=$("fUrl").value.trim();
+  if(!/^[A-Za-z0-9_-]{6,40}$/.test(d)){$("err").textContent="Device ID: 6–40 letters, numbers, - or _ only";return}
+  if(!/^wss?:\/\//.test(u)){$("err").textContent="Broker URL must start with wss://";return}
+  cfg={url:u,user:$("fUser").value.trim(),pass:$("fPass").value,dev:d};
+  save();$("ov").hidden=true;connect();
+};
+
+// Phones freeze background tabs: after a long pause, reconnect right away
+document.addEventListener("visibilitychange",function(){
+  if(document.hidden){hiddenAt=Date.now();return}
+  if(client&&Date.now()-hiddenAt>20000){try{client.reconnect()}catch(e){}}
+  render();
+});
+window.addEventListener("online",function(){if(client&&!client.connected){try{client.reconnect()}catch(e){}}});
+
+if("serviceWorker" in navigator)window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){})});
+
+window.__mqttReady.then(function(ok){libFail=!ok;connect()});
+setInterval(render,250);
+render();
+})();
+</script>
+</body></html>
